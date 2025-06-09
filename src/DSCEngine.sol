@@ -5,6 +5,7 @@ import {DecentralizedStableCoin} from "./DecentralizedStableCoin.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
+import {OracleLib} from "./libraries/OracleLib.sol";
 
 /**
  * @title DSCEngine
@@ -14,7 +15,7 @@ import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/interfaces/Ag
  * This stablecoin has the properties:
  * - Exogenous Collateral
  * - Dollar Pegged
- * - Algortimically Stable
+ * - Algoritmically Stable
  *
  * It is similar to DAI if DAI has no governance, no fees, and was only backed by WETH and WBTC.
  *
@@ -37,6 +38,11 @@ contract DSCEngine is ReentrancyGuard {
     error DSCEngine__HealthFactorOk();
     error DSCEngine__HealthFactorNotImproved();
 
+        /*//////////////////////////////////////////////////////////////
+                                 TYPES
+    //////////////////////////////////////////////////////////////*/
+    using OracleLib for AggregatorV3Interface;
+
     /*//////////////////////////////////////////////////////////////
                             STATE VARIABLES
     //////////////////////////////////////////////////////////////*/
@@ -44,7 +50,7 @@ contract DSCEngine is ReentrancyGuard {
     uint256 private constant PRECISION = 1e18;
     uint256 private constant LIQUIDATION_THRESHOLD = 50;  // 200% overcollateralized
     uint256 private constant LIQUIDATION_PRECISION = 100;
-    uint256 private constant MIN_HEALTH_FACTOR = 1;
+    uint256 private constant MIN_HEALTH_FACTOR = 1e18;
     uint256 private constant LIQUIDATION_BONUS = 10; // this means a 10% bonus
 
     mapping(address token => address priceFeed) private s_priceFeeds; // tokenToPriceFeed
@@ -322,7 +328,7 @@ contract DSCEngine is ReentrancyGuard {
       // $/ETH ETH ??
       // $2000 / ETH. $1000 = 0.5 ETH
       AggregatorV3Interface priceFeed = AggregatorV3Interface(s_priceFeeds[token]);
-      (, int256 price,,,) = priceFeed.latestRoundData();
+      (, int256 price,,,) = priceFeed.staleCheckLatestRoundData();
 
       // Example : ($10e18 * 1e18) / ($2000e8 * 1e10)
       return ((usdAmountInWei * PRECISION) / (uint256(price) * ADDITIONAL_FEED_PRECISION));
@@ -340,7 +346,7 @@ contract DSCEngine is ReentrancyGuard {
 
     function getUsdValue(address token, uint256 amount) public view returns (uint256){
       AggregatorV3Interface priceFeed = AggregatorV3Interface(s_priceFeeds[token]);
-      (,int256 price,,,) = priceFeed.latestRoundData();
+      (,int256 price,,,) = priceFeed.staleCheckLatestRoundData();
       // if 1ETH = $1000
       // The returned value from Chainlink will be 1000 * 1e8 (1e8 because for ETH/USD the pricefeed will return 8 decimal places : see chainlink docs for that) 
       return ((uint256(price) * ADDITIONAL_FEED_PRECISION) * amount)/PRECISION;
@@ -351,4 +357,15 @@ contract DSCEngine is ReentrancyGuard {
       return (totalDscMinted, collateralValueInUsd);
     }
 
+    function getCollateralTokens() external view returns (address[] memory) {
+      return s_collateralTokens;
+    }
+
+    function getCollateralBalanceOfUser(address user, address token) external view returns (uint256) {
+      return s_collateralDeposited[user][token];
+    }
+
+    function getCollateralTokenPriceFeed(address token) external view returns (address) {
+        return s_priceFeeds[token];
+    }
 }
